@@ -50,6 +50,7 @@ ImportsInit(
     Winguest.GetMissingFeatures = (PFUNC_WinguestGetMissingFeatures)GetProcAddress(WinguestdllHandle, "WinguestGetMissingFeatures");
     Winguest.ConfigureFeedback = (PFUNC_WinguestConfigureFeedback)GetProcAddress(WinguestdllHandle, "WinguestConfigureFeedback");
     Winguest.RegisterCallback = (PFUNC_WinguestRegisterCallback)GetProcAddress(WinguestdllHandle, "WinguestRegisterCallback");
+    Winguest.GetListOfProcesses = (PFUNC_WinguestGetListOfProcesses)GetProcAddress(WinguestdllHandle, "WinguestGetListOfProcesses");
 
     // Check that at least one function has not been imported. If so, fail
     if (
@@ -69,7 +70,8 @@ ImportsInit(
         !Winguest.NtStatusToString ||
         !Winguest.GetMissingFeatures ||
         !Winguest.ConfigureFeedback ||
-        !Winguest.RegisterCallback
+        !Winguest.RegisterCallback ||
+        !Winguest.GetListOfProcesses
         )
     {
         wprintf(L"At least one function failed to import!");

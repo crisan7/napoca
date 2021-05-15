@@ -538,6 +538,20 @@ NTSTATUS
     );
 
 
+WINGUEST_DLL_API
+NTSTATUS
+WINGUEST_CALLING_CONV
+WinguestGetListOfProcesses(
+    _Inout_  LIST_OF_PROCESSES*
+);
+typedef
+NTSTATUS
+(WINGUEST_CALLING_CONV
+    *PFUNC_WinguestGetListOfProcesses)(
+        _Inout_ LIST_OF_PROCESSES* ListOfProcesses
+        );
+
+
 /**
  * @brief Modify dynamically the runtime variables. If the modification succeeded it tries to make the modified variable persistent on disk. If the persistent save fails, STATUS_SUCCESS is returned.
  *

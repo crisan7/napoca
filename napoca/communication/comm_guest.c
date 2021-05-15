@@ -436,6 +436,10 @@ VxhVmCallGuestMessage(
                 commMsg->ProcessingStatus = MsgGetCfgItemData((PCMD_GET_CFG_ITEM_DATA)commMsg);
                 break;
 
+            case cmdGetListOfProcesses:
+                commMsg->ProcessingStatus = MsgGetListOfProcesses((CMD_GET_LIST_OF_PROCESSES*)commMsg);
+                break;
+
             case cmdSetCfgItemData:
                 commMsg->ProcessingStatus = MsgSetCfgItemData((PCMD_SET_CFG_ITEM_DATA)commMsg);
                 break;

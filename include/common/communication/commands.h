@@ -107,6 +107,7 @@ Message ID fields:
 #define cmdAddExceptionFromAlert                (0x09 | MSG_TYPE_EXT | MSG_TARGET_HV | MSG_CLASS_INTRO)
 #define cmdRemoveException                      (0x0A | MSG_TYPE_EXT | MSG_TARGET_HV | MSG_CLASS_INTRO)
 #define cmdIntroGuestInfo                       (0x0B | MSG_TYPE_EXT | MSG_TARGET_HV | MSG_CLASS_INTRO)
+#define cmdGetListOfProcesses                   (0x0C | MSG_TYPE_EXT | MSG_TARGET_HV)
 
 // for winguest.sys
 #define cmdCommandThreadCount                   (0x01 | MSG_TYPE_EXT | MSG_TARGET_WINGUEST_KM)
@@ -399,6 +400,15 @@ typedef struct _CMD_GET_CFG_ITEM_DATA
     // inout
     CFG_ITEM_DATA   CfgItemData;            ///< Value Data
 } CMD_GET_CFG_ITEM_DATA, *PCMD_GET_CFG_ITEM_DATA;
+
+
+typedef struct _CMD_GET_LIST_OF_PROCESSES
+{
+    COMM_MESSAGE    Command;                ///< Standard Message Header
+
+    // inout
+    LIST_OF_PROCESSES   ListOfProcesses;    ///< List of processes
+} CMD_GET_LIST_OF_PROCESSES;
 
 
 /*! @def cmdSetCfgItemData

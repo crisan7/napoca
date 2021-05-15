@@ -1743,6 +1743,57 @@ WinguestGetCfgItemData(
 
 WINGUEST_DLL_API
 NTSTATUS
+WinguestGetListOfProcesses(
+    __inout LIST_OF_PROCESSES* ListOfProcesses
+)
+{
+    NTSTATUS status = STATUS_SUCCESS;
+
+    if (ListOfProcesses == NULL)
+    {
+        return STATUS_INVALID_PARAMETER_1;
+    }
+
+    LogVerbose("Getting list of processes...\n");
+
+    // init out member of this structure
+    memset(ListOfProcesses, 0, sizeof(ListOfProcesses[0]));
+
+    std::unique_ptr<CMD_GET_LIST_OF_PROCESSES> cmd = std::make_unique<CMD_GET_LIST_OF_PROCESSES>();
+
+    RtlSecureZeroMemory(cmd.get(), sizeof(CMD_GET_LIST_OF_PROCESSES));
+
+    cmd->ListOfProcesses = *ListOfProcesses;
+
+    status = KernCommSendMessage(
+        cmdGetListOfProcesses,
+        TargetNapoca,
+        cmd.get(),
+        sizeof(CMD_GET_LIST_OF_PROCESSES),
+        cmd.get(),
+        sizeof(CMD_GET_LIST_OF_PROCESSES),
+        NULL
+    );
+    if (!NT_SUCCESS(status))
+    {
+        LogFuncErrorStatus(status, "KernCommSendMessage");
+        return status;
+    }
+
+    status = cmd->Command.ProcessingStatus;
+    if (!NT_SUCCESS(status))
+    {
+        LogFuncErrorStatus(status, "cmdGetListOfProcesses");
+        return status;
+    }
+
+    *ListOfProcesses = cmd->ListOfProcesses;
+
+    return STATUS_SUCCESS;
+}
+
+WINGUEST_DLL_API
+NTSTATUS
 WinguestSetCfgVar(
     __in const CHAR* Cmdline
 )

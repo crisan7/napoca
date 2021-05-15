@@ -180,6 +180,11 @@ typedef struct _CFG_ITEM_DATA
     }Value;
 }CFG_ITEM_DATA, *PCFG_ITEM_DATA;
 
+typedef struct _LIST_OF_PROCESSES
+{
+    DWORD Test;
+}LIST_OF_PROCESSES;
+
 #pragma pack(pop)
 
 #endif // _DACIA_TYPES_H_

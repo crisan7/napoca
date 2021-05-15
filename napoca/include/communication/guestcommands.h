@@ -57,6 +57,11 @@ MsgGetCfgItemData(
     );
 
 NTSTATUS
+MsgGetListOfProcesses(
+    CMD_GET_LIST_OF_PROCESSES *Message
+);
+
+NTSTATUS
 MsgSetCfgItemData(
     CMD_SET_CFG_ITEM_DATA *Message
     );

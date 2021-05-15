@@ -87,6 +87,8 @@ CommCommandToString(
             return "cmdGetLogsHv";
         case cmdGetCfgItemData:
             return "cmdGetCfgItemData";
+        case cmdGetListOfProcesses:
+            return "cmdGetListOfProcesses";
         case cmdSetCfgItemData:
             return "cmdGetSfgItemData";
         case cmdUpdateModule:

@@ -845,6 +845,16 @@ MsgGetCfgItemData(
     }
 }
 
+NTSTATUS
+MsgGetListOfProcesses(
+    CMD_GET_LIST_OF_PROCESSES *Message
+)
+{
+    Message->ListOfProcesses.Test = 7;
+
+    return CX_STATUS_SUCCESS;
+}
+
 /**
  * @brief Handler for #cmdSetCfgItemData
  *

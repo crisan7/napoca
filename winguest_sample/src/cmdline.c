@@ -58,6 +58,7 @@ static NTSTATUS _CmdQueryIntrospection(_In_ DWORD Argc, _In_ WCHAR **Argv);
 static NTSTATUS _CmdGetMissingFeatures(_In_ DWORD Argc, _In_ WCHAR **Argv);
 static NTSTATUS _CmdEnableFeedback(_In_ DWORD Argc, _In_ WCHAR **Argv);
 static NTSTATUS _CmdFeedbackVerbosity(_In_ DWORD Argc, _In_ WCHAR **Argv);
+static NTSTATUS _CmdGetListOfProcesses(_In_ DWORD Argc, _In_ WCHAR **Argv);
 
 //
 // Commands list
@@ -221,6 +222,13 @@ static COMMAND CommandLineCommands[] =
         L"Close the application.",
         NULL,
         _CmdExit
+    },
+    {
+        L"get-list-of-processes", NULL,
+        0, 0,
+        L"Get list of processes",
+        NULL,
+        _CmdGetListOfProcesses
     },
 };
 #define NUMBER_OF_COMMANDS _countof(CommandLineCommands)
@@ -931,4 +939,27 @@ _CmdFeedbackVerbosity(
     }
 
     return FeedbackSetVerbosity(noisy);
+}
+
+static
+NTSTATUS
+_CmdGetListOfProcesses(
+    _In_ DWORD  Argc,
+    _In_ WCHAR **Argv
+)
+{
+    UNREFERENCED_PARAMETER(Argc);
+    UNREFERENCED_PARAMETER(Argv);
+
+    LIST_OF_PROCESSES listOfProcesses = { 0 };
+    NTSTATUS status = Winguest.GetListOfProcesses(&listOfProcesses);
+    if (!NT_SUCCESS(status))
+    {
+        wprintf(L"GetListOfProcesses failed with status = %S (0x%x)\n", Winguest.NtStatusToString(status), status);
+        return status;
+    }
+
+    wprintf(L"Returned value = %d\n", listOfProcesses.Test);
+
+    return status;
 }

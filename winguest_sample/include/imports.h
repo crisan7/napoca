@@ -57,6 +57,7 @@ typedef struct _WINGUEST_IMPORTS
     PFUNC_WinguestGetMissingFeatures    GetMissingFeatures;
     PFUNC_WinguestConfigureFeedback     ConfigureFeedback;
     PFUNC_WinguestRegisterCallback      RegisterCallback;
+    PFUNC_WinguestGetListOfProcesses    GetListOfProcesses;
 }WINGUEST_IMPORTS;
 extern WINGUEST_IMPORTS Winguest;
 
