@@ -226,8 +226,10 @@ _IsGvaPsActiveProcess(
     QWORD Gva
 )
 {
+    BOOLEAN result = FALSE;
     WIN_LIST_ENTRY32 *listEntry32 = NULL;
     WIN_LIST_ENTRY64 *listEntry64 = NULL;
+    BYTE *possibleSystemProcessHva = NULL;
 
     STATUS status;
     if (GuestMode == ND_CODE_32)
@@ -236,7 +238,7 @@ _IsGvaPsActiveProcess(
             HvGetCurrentVcpu(),
             Gva,
             1,
-            0,
+            CHM_FLAG_AUTO_ALIGN,
             &listEntry32,
             NULL,
             TAG_CMDLINE
@@ -248,7 +250,7 @@ _IsGvaPsActiveProcess(
             HvGetCurrentVcpu(),
             Gva,
             1,
-            0,
+            CHM_FLAG_AUTO_ALIGN,
             &listEntry64,
             NULL,
             TAG_CMDLINE
@@ -262,24 +264,31 @@ _IsGvaPsActiveProcess(
 
     if (GuestMode == ND_CODE_32)
     {
-        if (!IS_KERNEL_POINTER(listEntry32->Flink) || !IS_KERNEL_POINTER(listEntry32->Blink)) return FALSE;
+        if (!IS_KERNEL_POINTER(listEntry32->Flink) || !IS_KERNEL_POINTER(listEntry32->Blink))
+        {
+            result = FALSE;
+            goto cleanup;
+        }
     }
     else
     {
-        if (!IS_KERNEL_POINTER(listEntry64->Flink) || !IS_KERNEL_POINTER(listEntry64->Blink)) return FALSE;
+        if (!IS_KERNEL_POINTER(listEntry64->Flink) || !IS_KERNEL_POINTER(listEntry64->Blink))
+        {
+            result = FALSE;
+            goto cleanup;
+        }
     }
 
 
     QWORD possibleSystemProcessGva = GuestMode == ND_CODE_32 ?
         listEntry32->Flink : listEntry64->Flink;
-    BYTE *possibleSystemProcessHva;
     possibleSystemProcessGva -= LINK_OFFSET_IN_EPROCESS;
 
     status = ChmMapGuestGvaPagesToHost(
         HvGetCurrentVcpu(),
         possibleSystemProcessGva,
         1,
-        0,
+        CHM_FLAG_AUTO_ALIGN,
         &possibleSystemProcessHva,
         NULL,
         TAG_CMDLINE
@@ -287,7 +296,8 @@ _IsGvaPsActiveProcess(
     if (!CX_SUCCESS(status))
     {
         LOG("ERROR: ChmMapGuestGvaPagesToHost failed: 0x%08x\n", status);
-        return FALSE;
+        result = FALSE;
+        goto cleanup;
     }
 
     // Daca pid-ul este patru si process name == System (verificam numa prima litera...)
@@ -297,10 +307,15 @@ _IsGvaPsActiveProcess(
             || possibleSystemProcessHva[NAME_OFFSET_IN_EPROCESS] == 's'))
     {
 
-        return TRUE;
+        result = TRUE;
     }
 
-    return FALSE;
+cleanup:
+    if (listEntry32 != NULL)                ChmUnmapGuestGvaPages(&listEntry32, TAG_CMDLINE);
+    if (listEntry64 != NULL)                ChmUnmapGuestGvaPages(&listEntry64, TAG_CMDLINE);
+    if (possibleSystemProcessHva != NULL)   ChmUnmapGuestGvaPages(&possibleSystemProcessHva, TAG_CMDLINE);
+
+    return result;
 }
 
 NTSTATUS
@@ -313,6 +328,20 @@ GuestIntNapQueryGuestInfo(
     PVOID Buffer,
     _In_ DWORD BufferLength
 );
+
+__forceinline static BOOLEAN EqualsCaseInsensitiveNotSafe(char *string1, char *string2, int no)
+{
+    // primu operand ii cu litere mici mereu :DDD
+    for (int i = 0; i < no; ++i)
+    {
+        if ((string1[i] != string2[i]) && (string1[i] != (string2[i] + 32)))
+        {
+            return FALSE;
+        }
+    }
+
+    return TRUE;
+}
 
 /**
  * @brief Informs the hypervisor that an in-guest component attempts to connect and establishes the connection. Handler for #OPT_INIT_GUEST_COMMUNICATION
@@ -337,6 +366,7 @@ GuestClientConnected(
     NTSTATUS status = CX_STATUS_SUCCESS;
     VCPU* vcpu = HvGetCurrentVcpu();
     HV_COMM_PORT* currentPort = NULL;
+    CX_VOID *temp = NULL;
 
     if (TargetUndefined == Component)
     {
@@ -391,9 +421,149 @@ GuestClientConnected(
 
     InsertTailList(&gHypervisorGlobalData.Comm.Ports, &currentPort->ListEntry);
 
+    // Get PsActiveProcessHead
+    CX_UINT64 idtBase;
+    vmx_vmread(VMCS_GUEST_IDTR_BASE, &idtBase);
+
+    CX_UINT64 pageFaultHandler = 0;
+    status = GstGetVcpuMode(
+        HvGetCurrentVcpu(),
+        &GuestMode
+    );
+    if (!CX_SUCCESS(status))
+    {
+        ERROR("GstGetVcpuMode %d\n", status);
+        goto cleanup;
+    }
+
+    if (GuestMode == ND_CODE_64)
+    {
+        INTR_INTERRUPT_GATE *gate;
+        status = ChmMapGuestGvaPagesToHost(
+            HvGetCurrentVcpu(),
+            idtBase + 14 * sizeof(INTR_INTERRUPT_GATE),
+            1,
+            0,
+            &gate,
+            NULL,
+            TAG_CMDLINE
+        );
+        if (!CX_SUCCESS(status))
+        {
+            ERROR("GuestVAToHostVA %d\n", status);
+            //goto cleanup;
+        }
+        pageFaultHandler = ((QWORD)gate->Offset_63_32 << 32) | ((QWORD)gate->Offset_31_16 << 16) | ((QWORD)gate->Offset_15_0);
+
+        ChmUnmapGuestGvaPages(&gate, TAG_CMDLINE);
+    }
+    else if (GuestMode == ND_CODE_32)
+    {
+        INTR_INTERRUPT_GATE32 *gate;
+        status = ChmMapGuestGvaPagesToHost(
+            HvGetCurrentVcpu(),
+            idtBase + 14 * sizeof(INTR_INTERRUPT_GATE32),
+            1,
+            0,
+            &gate,
+            NULL,
+            TAG_CMDLINE
+        );
+        if (!CX_SUCCESS(status))
+        {
+            ERROR("GuestVAToHostVA %d\n", status);
+            //goto cleanup;
+        }
+
+        pageFaultHandler = ((QWORD)gate->Offset_31_16 << 16) | ((QWORD)gate->Offset_15_0);
+
+        ChmUnmapGuestGvaPages(&gate, TAG_CMDLINE);
+    }
+    else
+    {
+        LOG("Problem !!!!!!\n");
+    }
+
+    CX_UINT64 possibleStartOfKernelGva = pageFaultHandler & PAGE_MASK;
+
+    status = ChmMapGuestGvaPagesToHost(
+        HvGetCurrentVcpu(),
+        possibleStartOfKernelGva,
+        1,
+        0,
+        &temp,
+        NULL,
+        TAG_CMDLINE
+    );
+    if (!CX_SUCCESS(status))
+    {
+        ERROR("GuestVAToHostVA %s\n", NtStatusToString(status));
+        goto try_again;
+    }
+
+    while (*((WORD *)temp) != MZPE_MAGIC)
+    {
+        ChmUnmapGuestGvaPages(&temp, TAG_CMDLINE);
+
+    try_again:
+
+        possibleStartOfKernelGva -= PAGE_SIZE;
+        status = ChmMapGuestGvaPagesToHost(
+            HvGetCurrentVcpu(),
+            possibleStartOfKernelGva,
+            1,
+            0,
+            (CX_VOID **)&temp,
+            NULL,
+            TAG_CMDLINE
+        );
+        if (!CX_SUCCESS(status))
+        {
+            ERROR("GuestVAToHostVA %d\n", status);
+            goto try_again;
+        }
+    }
+
+    CX_UINT64 kernalBaseGva = possibleStartOfKernelGva;
+    IMAGE_DOS_HEADER *imgDosHeader = (IMAGE_DOS_HEADER *)temp;
+
+    // acum ca am gasit IMAGE_DOS_HEADER putem sa gasim
+    // IMAGE_FILE_HEADER pt a vedea cate sectiuni sunt si sizeOfOptionalHeader
+    // pentru a putea calcula offset-ul pana la prima sectiune
+    IMAGE_FILE_HEADER *imageFileHeader = (IMAGE_FILE_HEADER *)(((QWORD)imgDosHeader) +
+        imgDosHeader->e_lfanew + sizeof(DWORD));
+
+    LOG("--->NumberOfSections = %d\n", imageFileHeader->NumberOfSections);
+    LOG("--->SizeOfOptionalHeader = 0x%x\n", imageFileHeader->SizeOfOptionalHeader);
+
+    IMAGE_SECTION_HEADER *section = (IMAGE_SECTION_HEADER *)(((QWORD)imageFileHeader)
+        + sizeof(IMAGE_FILE_HEADER) + imageFileHeader->SizeOfOptionalHeader);
+
+    for (DWORD i = 0; i < imageFileHeader->NumberOfSections; ++i)
+    {
+        if (
+            (EqualsCaseInsensitiveNotSafe(".data", (char *)section->Name, 5))
+            || (EqualsCaseInsensitiveNotSafe("almostro", (char *)section->Name, 8))
+            )
+        {
+            for (QWORD rva = section->VirtualAddress; rva < (QWORD)section->VirtualAddress + section->Misc.VirtualSize;
+                rva += GuestMode == ND_CODE_32 ? sizeof(WIN_LIST_ENTRY32) : sizeof(WIN_LIST_ENTRY64))
+            {
+                QWORD possiblePsActiveProcessHeadGva = kernalBaseGva + rva;
+                if (_IsGvaPsActiveProcess(possiblePsActiveProcessHeadGva))
+                {
+                    LOG("!!!!!FOUND PsActiveProcess!!!!! Gva = 0x%X\n", possiblePsActiveProcessHeadGva);
+                    PsActiveProcessHeadGVA = possiblePsActiveProcessHeadGva;
+                    goto cleanup;
+                }
+            }
+        }
+
+        ++section;
+    }
 
 cleanup:
-
+    if(temp != NULL) ChmUnmapGuestGvaPages(&temp, TAG_CMDLINE);
     HvReleaseSpinLock(&gHypervisorGlobalData.Comm.Lock);
 
     return status;
