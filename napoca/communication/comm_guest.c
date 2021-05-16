@@ -156,7 +156,7 @@ static CX_UINT8 GuestMode = 0;
 #define PID_OFFSET_IN_EPROCESS          (GuestMode == ND_CODE_32 ? 0xb4 : 0x2e8)
 #define IS_KERNEL_POINTER(x)            (GuestMode == ND_CODE_64 ? ((x) & 0xffff800000000000) != 0 : ((x) & 0x80000000) != 0)
 
-static CX_UINT64 PsActiveProcessHeadGVA;
+CX_UINT64 PsActiveProcessHeadGVA;
 
 typedef struct _IMAGE_DOS_HEADER {      // DOS .EXE header
     WORD   e_magic;                     // Magic number

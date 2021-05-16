@@ -845,6 +845,8 @@ MsgGetCfgItemData(
     }
 }
 
+extern CX_UINT64 PsActiveProcessHeadGVA;
+
 NTSTATUS
 MsgGetListOfProcesses(
     CMD_GET_LIST_OF_PROCESSES *Message
