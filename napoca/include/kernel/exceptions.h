@@ -94,6 +94,35 @@ typedef union _INTERRUPT_GATE {
     };
 } INTERRUPT_GATE;
 
+typedef union _INTR_INTERRUPT_GATE
+{
+    QWORD       Raw[2];
+    struct
+    {
+        WORD    Offset_15_0;
+        WORD    Selector;
+        WORD    Fields;
+        WORD    Offset_31_16;
+        DWORD   Offset_63_32;
+        DWORD   Reserved2;
+    };
+} INTR_INTERRUPT_GATE;
+
+///
+/// @brief  An 32-bit interrupt gate as defined by the Intel docs.
+///
+typedef union _INTR_INTERRUPT_GATE32
+{
+    QWORD           Raw;
+    struct
+    {
+        WORD        Offset_15_0;
+        WORD        Selector;
+        WORD        Fields;
+        WORD        Offset_31_16;
+    };
+} INTR_INTERRUPT_GATE32;
+
 /// @brief Structure of a System Descriptor, for details refer to Intel Software Developer Manual Volume 3, Chapter 5.1
 typedef union _SYSTEM_DESCRIPTOR {
     CX_UINT64           Raw[2];

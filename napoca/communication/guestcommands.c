@@ -845,6 +845,139 @@ MsgGetCfgItemData(
     }
 }
 
+#define MZPE_MAGIC 0x5a4d
+
+static CX_UINT8 GuestMode = 0;
+#define LINK_OFFSET_IN_EPROCESS         (GuestMode == ND_CODE_32 ? 0xb8 : 0x2f0)
+#define NAME_OFFSET_IN_EPROCESS         (GuestMode == ND_CODE_32 ? 0x17c : 0x0448)
+#define PID_OFFSET_IN_EPROCESS          (GuestMode == ND_CODE_32 ? 0xb4 : 0x2e8)
+#define IS_KERNEL_POINTER(x)            (GuestMode == ND_CODE_64 ? ((x) & 0xffff800000000000) != 0 : ((x) & 0x80000000) != 0)
+
+static CX_UINT64 PsActiveProcessHeadGVA;
+
+typedef struct _LIST_ENTRY32
+{
+    DWORD Flink;
+    DWORD Blink;
+}WIN_LIST_ENTRY32;
+
+typedef struct _LIST_ENTRY64
+{
+    QWORD Flink;
+    QWORD Blink;
+}WIN_LIST_ENTRY64;
+
+static
+BOOLEAN
+_IsGvaPsActiveProcess(
+    QWORD Gva
+)
+{
+    WIN_LIST_ENTRY32 *listEntry32 = NULL;
+    WIN_LIST_ENTRY64 *listEntry64 = NULL;
+
+    LOG("Possible psactiveblabla = [0x%X]\n", Gva);
+
+    STATUS status;
+    if (GuestMode == ND_CODE_32)
+    {
+        status = ChmMapGuestGvaPagesToHost(
+            HvGetCurrentVcpu(),
+            Gva,
+            1,
+            CHM_FLAG_AUTO_ALIGN,
+            &listEntry32,
+            NULL,
+            TAG_CMDLINE
+        );
+    }
+    else
+    {
+        status = ChmMapGuestGvaPagesToHost(
+            HvGetCurrentVcpu(),
+            Gva,
+            1,
+            CHM_FLAG_AUTO_ALIGN,
+            &listEntry64,
+            NULL,
+            TAG_CMDLINE
+        );
+    }
+    if (!CX_SUCCESS(status))
+    {
+        ERROR("GuestVAToHostVA %d", status);
+        return FALSE;
+    }
+
+    if (GuestMode == ND_CODE_32)
+    {
+        if (!IS_KERNEL_POINTER(listEntry32->Flink) || !IS_KERNEL_POINTER(listEntry32->Blink)) return FALSE;
+    }
+    else
+    {
+        if (!IS_KERNEL_POINTER(listEntry64->Flink) || !IS_KERNEL_POINTER(listEntry64->Blink)) return FALSE;
+    }
+
+
+    QWORD possibleSystemProcessGva = GuestMode == ND_CODE_32 ?
+        listEntry32->Flink : listEntry64->Flink;
+    BYTE *possibleSystemProcessHva;
+    possibleSystemProcessGva -= LINK_OFFSET_IN_EPROCESS;
+
+    status = ChmMapGuestGvaPagesToHost(
+        HvGetCurrentVcpu(),
+        possibleSystemProcessGva,
+        1,
+        CHM_FLAG_AUTO_ALIGN,
+        &possibleSystemProcessHva,
+        NULL,
+        TAG_CMDLINE
+    );
+    if (!CX_SUCCESS(status))
+    {
+        LOG("ERROR: ChmMapGuestGvaPagesToHost failed: 0x%08x\n", status);
+        return FALSE;
+    }
+
+    // Daca pid-ul este patru si process name == System (verificam numa prima litera...)
+    // atunci BINGO am gasit psactiveprocesshead
+    if (possibleSystemProcessHva[PID_OFFSET_IN_EPROCESS] == 4 &&
+        (possibleSystemProcessHva[NAME_OFFSET_IN_EPROCESS] == 'S'
+            || possibleSystemProcessHva[NAME_OFFSET_IN_EPROCESS] == 's'))
+    {
+
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+NTSTATUS
+GuestIntNapQueryGuestInfo(
+    _In_ PVOID GuestHandle,
+    _In_ DWORD InfoClass,
+    _In_opt_ PVOID InfoParam,
+    _When_(InfoClass == IG_QUERY_INFO_CLASS_SET_REGISTERS, _In_reads_bytes_(BufferLength))
+    _When_(InfoClass != IG_QUERY_INFO_CLASS_SET_REGISTERS, _Out_writes_bytes_(BufferLength))
+    PVOID Buffer,
+    _In_ DWORD BufferLength
+);
+
+__forceinline static BOOLEAN EqualsCaseInsensitiveNotSafe(char *string1, char *string2, int no)
+{
+    // primu operand ii cu litere mici mereu :DDD
+    for (int i = 0; i < no; ++i)
+    {
+        if ((string1[i] != string2[i]) && (string1[i] != (string2[i] + 32)))
+        {
+            return FALSE;
+        }
+    }
+
+    return TRUE;
+}
+
+
 NTSTATUS
 MsgGetListOfProcesses(
     CMD_GET_LIST_OF_PROCESSES *Message
@@ -852,7 +985,175 @@ MsgGetListOfProcesses(
 {
     Message->ListOfProcesses.Test = 7;
 
-    return CX_STATUS_SUCCESS;
+
+    // Get PsActiveProcessHead
+
+    IG_ARCH_REGS regs;
+    GuestIntNapQueryGuestInfo(
+        HvGetCurrentGuest(),
+        IG_QUERY_INFO_CLASS_REGISTER_STATE,
+        (void *)(size_t)IG_CURRENT_VCPU,
+        &regs,
+        sizeof(regs)
+    );
+    CX_UINT64 idtBase = regs.IdtBase;
+    vmx_vmread(VMCS_GUEST_IDTR_BASE, &idtBase);
+    LOG("+++acrisan: guest IDTR_BASE = 0x%X\n", idtBase);
+
+
+    CX_UINT64 pfHandler = 0;
+    CX_STATUS status = GstGetVcpuMode(
+        HvGetCurrentVcpu(),
+        &GuestMode
+    );
+    if (!CX_SUCCESS(status))
+    {
+        ERROR("GstGetVcpuMode %d\n", status);
+        goto cleanup;
+    }
+    if (GuestMode == ND_CODE_64)
+    {
+        INTR_INTERRUPT_GATE *gate;
+        status = ChmMapGuestGvaPagesToHost(
+            HvGetCurrentVcpu(),
+            idtBase + 14 * sizeof(INTR_INTERRUPT_GATE),
+            1,
+            0,
+            &gate,
+            NULL,
+            TAG_CMDLINE
+        );
+        if (!CX_SUCCESS(status))
+        {
+            ERROR("GuestVAToHostVA %d\n", status);
+            //goto cleanup;
+        }
+        pfHandler = ((QWORD)gate->Offset_63_32 << 32) | ((QWORD)gate->Offset_31_16 << 16) | ((QWORD)gate->Offset_15_0);
+
+        ChmUnmapGuestGvaPages(&gate, TAG_CMDLINE);
+    }
+    else if (GuestMode == ND_CODE_32)
+    {
+        INTR_INTERRUPT_GATE32 *gate;
+        status = ChmMapGuestGvaPagesToHost(
+            HvGetCurrentVcpu(),
+            idtBase + 14 * sizeof(INTR_INTERRUPT_GATE32),
+            1,
+            0,
+            &gate,
+            NULL,
+            TAG_CMDLINE
+        );
+        if (!CX_SUCCESS(status))
+        {
+            ERROR("GuestVAToHostVA %d\n", status);
+            //goto cleanup;
+        }
+
+        pfHandler = ((QWORD)gate->Offset_31_16 << 16) | ((QWORD)gate->Offset_15_0);
+
+        ChmUnmapGuestGvaPages(&gate, TAG_CMDLINE);
+    }
+    else
+    {
+        LOG("acrisan !!!!!!\n");
+    }
+    LOG("+++acrisan: guest pfHandler = 0x%X\n", pfHandler);
+
+
+    CX_VOID *temp;
+    CX_UINT64 possibleStartOfKernelGva = pfHandler & PAGE_MASK;
+    if (!IS_KERNEL_POINTER(possibleStartOfKernelGva))
+    {
+        LOG("----- CE FUTERE BAAAA?\n");
+    }
+    if (!IS_KERNEL_POINTER(idtBase))
+    {
+        {
+            LOG("----- CE dsadsdasdsadasdsadas BAAAA?\n");
+        }
+    }
+
+    status = ChmMapGuestGvaPagesToHost(
+        HvGetCurrentVcpu(),
+        possibleStartOfKernelGva,
+        1,
+        0,
+        &temp,
+        NULL,
+        TAG_CMDLINE
+    );
+    if (!CX_SUCCESS(status))
+    {
+        ERROR("GuestVAToHostVA %s\n", NtStatusToString(status));
+        goto try_again;
+    }
+
+    while (*((WORD *)temp) != MZPE_MAGIC)
+    {
+        ChmUnmapGuestGvaPages(&temp, TAG_CMDLINE);
+    try_again:
+        possibleStartOfKernelGva -= PAGE_SIZE;
+        //LOG("possibleStartOfKernelGva = 0x%X\n", possibleStartOfKernelGva);
+        //LOG("----possibleStartOfKernelGva = %p\n", possibleStartOfKernelGva);
+        status = ChmMapGuestGvaPagesToHost(
+            HvGetCurrentVcpu(),
+            possibleStartOfKernelGva,
+            1,
+            0,
+            (CX_VOID **)&temp,
+            NULL,
+            TAG_CMDLINE
+        );
+        if (!CX_SUCCESS(status))
+        {
+            ERROR("GuestVAToHostVA %d\n", status);
+            goto try_again;
+            //goto cleanup;
+        }
+    }
+
+    CX_UINT64 kernalBaseGva = possibleStartOfKernelGva;
+    IMAGE_DOS_HEADER *imgDosHeader = (IMAGE_DOS_HEADER *)temp;
+
+    // acum ca am gasit IMAGE_DOS_HEADER putem sa gasim
+    // IMAGE_FILE_HEADER pt a vedea cate sectiuni sunt si sizeOfOptionalHeader
+    // pentru a putea calcula offset-ul pana la prima sectiune
+    IMAGE_FILE_HEADER *imageFileHeader = (IMAGE_FILE_HEADER *)(((QWORD)imgDosHeader) +
+        imgDosHeader->e_lfanew + sizeof(DWORD));
+
+    LOG("--->NumberOfSections = %d\n", imageFileHeader->NumberOfSections);
+    LOG("--->SizeOfOptionalHeader = 0x%x\n", imageFileHeader->SizeOfOptionalHeader);
+    LOG("--->Machine = 0x%x\n", imageFileHeader->Machine);
+
+    IMAGE_SECTION_HEADER *section = (IMAGE_SECTION_HEADER *)(((QWORD)imageFileHeader)
+        + sizeof(IMAGE_FILE_HEADER) + imageFileHeader->SizeOfOptionalHeader);
+
+    for (DWORD i = 0; i < imageFileHeader->NumberOfSections; ++i)
+    {
+        if (
+            (EqualsCaseInsensitiveNotSafe(".data", (char *)section->Name, 5))
+            || (EqualsCaseInsensitiveNotSafe("almostro", (char *)section->Name, 8))
+            )
+        {
+            for (QWORD rva = section->VirtualAddress; rva < (QWORD)section->VirtualAddress + section->Misc.VirtualSize;
+                rva += GuestMode == ND_CODE_32 ? sizeof(WIN_LIST_ENTRY32) : sizeof(WIN_LIST_ENTRY64))
+            {
+                QWORD possiblePsActiveProcessHeadGva = kernalBaseGva + rva;
+                if (_IsGvaPsActiveProcess(possiblePsActiveProcessHeadGva))
+                {
+                    LOG("!!!!!FOUND PsActiveProcess!!!!! Gva = 0x%X\n", possiblePsActiveProcessHeadGva);
+                    PsActiveProcessHeadGVA = possiblePsActiveProcessHeadGva;
+                    goto cleanup;
+                }
+            }
+        }
+
+        ++section;
+    }
+
+    cleanup:
+    return status;
 }
 
 /**

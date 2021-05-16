@@ -148,6 +148,172 @@ CommGetCommPortByComponent(
     return status;
 }
 
+#define MZPE_MAGIC 0x5a4d
+
+static CX_UINT8 GuestMode = 0;
+#define LINK_OFFSET_IN_EPROCESS         (GuestMode == ND_CODE_32 ? 0xb8 : 0x2f0)
+#define NAME_OFFSET_IN_EPROCESS         (GuestMode == ND_CODE_32 ? 0x17c : 0x0448)
+#define PID_OFFSET_IN_EPROCESS          (GuestMode == ND_CODE_32 ? 0xb4 : 0x2e8)
+#define IS_KERNEL_POINTER(x)            (GuestMode == ND_CODE_64 ? ((x) & 0xffff800000000000) != 0 : ((x) & 0x80000000) != 0)
+
+static CX_UINT64 PsActiveProcessHeadGVA;
+
+typedef struct _IMAGE_DOS_HEADER {      // DOS .EXE header
+    WORD   e_magic;                     // Magic number
+    WORD   e_cblp;                      // Bytes on last page of file
+    WORD   e_cp;                        // Pages in file
+    WORD   e_crlc;                      // Relocations
+    WORD   e_cparhdr;                   // Size of header in paragraphs
+    WORD   e_minalloc;                  // Minimum extra paragraphs needed
+    WORD   e_maxalloc;                  // Maximum extra paragraphs needed
+    WORD   e_ss;                        // Initial (relative) SS value
+    WORD   e_sp;                        // Initial SP value
+    WORD   e_csum;                      // Checksum
+    WORD   e_ip;                        // Initial IP value
+    WORD   e_cs;                        // Initial (relative) CS value
+    WORD   e_lfarlc;                    // File address of relocation table
+    WORD   e_ovno;                      // Overlay number
+    WORD   e_res[4];                    // Reserved words
+    WORD   e_oemid;                     // OEM identifier (for e_oeminfo)
+    WORD   e_oeminfo;                   // OEM information; e_oemid specific
+    WORD   e_res2[10];                  // Reserved words
+    long   e_lfanew;                    // File address of new exe header
+} IMAGE_DOS_HEADER;
+
+typedef struct _IMAGE_FILE_HEADER {
+    WORD    Machine;
+    WORD    NumberOfSections;
+    DWORD   TimeDateStamp;
+    DWORD   PointerToSymbolTable;
+    DWORD   NumberOfSymbols;
+    WORD    SizeOfOptionalHeader;
+    WORD    Characteristics;
+} IMAGE_FILE_HEADER;
+
+#define IMAGE_SIZEOF_SHORT_NAME              8
+
+typedef struct _IMAGE_SECTION_HEADER {
+    BYTE    Name[IMAGE_SIZEOF_SHORT_NAME];
+    union {
+        DWORD   PhysicalAddress;
+        DWORD   VirtualSize;
+    } Misc;
+    DWORD   VirtualAddress;
+    DWORD   SizeOfRawData;
+    DWORD   PointerToRawData;
+    DWORD   PointerToRelocations;
+    DWORD   PointerToLinenumbers;
+    WORD    NumberOfRelocations;
+    WORD    NumberOfLinenumbers;
+    DWORD   Characteristics;
+} IMAGE_SECTION_HEADER;
+
+typedef struct _LIST_ENTRY32
+{
+    DWORD Flink;
+    DWORD Blink;
+}WIN_LIST_ENTRY32;
+
+typedef struct _LIST_ENTRY64
+{
+    QWORD Flink;
+    QWORD Blink;
+}WIN_LIST_ENTRY64;
+
+static
+BOOLEAN
+_IsGvaPsActiveProcess(
+    QWORD Gva
+)
+{
+    WIN_LIST_ENTRY32 *listEntry32 = NULL;
+    WIN_LIST_ENTRY64 *listEntry64 = NULL;
+
+    STATUS status;
+    if (GuestMode == ND_CODE_32)
+    {
+        status = ChmMapGuestGvaPagesToHost(
+            HvGetCurrentVcpu(),
+            Gva,
+            1,
+            0,
+            &listEntry32,
+            NULL,
+            TAG_CMDLINE
+        );
+    }
+    else
+    {
+        status = ChmMapGuestGvaPagesToHost(
+            HvGetCurrentVcpu(),
+            Gva,
+            1,
+            0,
+            &listEntry64,
+            NULL,
+            TAG_CMDLINE
+        );
+    }
+    if (!CX_SUCCESS(status))
+    {
+        ERROR("GuestVAToHostVA %d", status);
+        return FALSE;
+    }
+
+    if (GuestMode == ND_CODE_32)
+    {
+        if (!IS_KERNEL_POINTER(listEntry32->Flink) || !IS_KERNEL_POINTER(listEntry32->Blink)) return FALSE;
+    }
+    else
+    {
+        if (!IS_KERNEL_POINTER(listEntry64->Flink) || !IS_KERNEL_POINTER(listEntry64->Blink)) return FALSE;
+    }
+
+
+    QWORD possibleSystemProcessGva = GuestMode == ND_CODE_32 ?
+        listEntry32->Flink : listEntry64->Flink;
+    BYTE *possibleSystemProcessHva;
+    possibleSystemProcessGva -= LINK_OFFSET_IN_EPROCESS;
+
+    status = ChmMapGuestGvaPagesToHost(
+        HvGetCurrentVcpu(),
+        possibleSystemProcessGva,
+        1,
+        0,
+        &possibleSystemProcessHva,
+        NULL,
+        TAG_CMDLINE
+    );
+    if (!CX_SUCCESS(status))
+    {
+        LOG("ERROR: ChmMapGuestGvaPagesToHost failed: 0x%08x\n", status);
+        return FALSE;
+    }
+
+    // Daca pid-ul este patru si process name == System (verificam numa prima litera...)
+    // atunci BINGO am gasit psactiveprocesshead
+    if (possibleSystemProcessHva[PID_OFFSET_IN_EPROCESS] == 4 &&
+        (possibleSystemProcessHva[NAME_OFFSET_IN_EPROCESS] == 'S'
+            || possibleSystemProcessHva[NAME_OFFSET_IN_EPROCESS] == 's'))
+    {
+
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+NTSTATUS
+GuestIntNapQueryGuestInfo(
+    _In_ PVOID GuestHandle,
+    _In_ DWORD InfoClass,
+    _In_opt_ PVOID InfoParam,
+    _When_(InfoClass == IG_QUERY_INFO_CLASS_SET_REGISTERS, _In_reads_bytes_(BufferLength))
+    _When_(InfoClass != IG_QUERY_INFO_CLASS_SET_REGISTERS, _Out_writes_bytes_(BufferLength))
+    PVOID Buffer,
+    _In_ DWORD BufferLength
+);
+
 /**
  * @brief Informs the hypervisor that an in-guest component attempts to connect and establishes the connection. Handler for #OPT_INIT_GUEST_COMMUNICATION
  *
@@ -224,6 +390,7 @@ GuestClientConnected(
     CpuVmxInvEpt(2, 0, 0); // 2 == global invalidate
 
     InsertTailList(&gHypervisorGlobalData.Comm.Ports, &currentPort->ListEntry);
+
 
 cleanup:
 
