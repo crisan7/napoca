@@ -845,7 +845,28 @@ MsgGetCfgItemData(
     }
 }
 
-extern CX_UINT64 PsActiveProcessHeadGVA;
+typedef struct _PS_ACTIVE_PROCESS
+{
+    CX_BOOL IsAvailable;
+    CX_UINT64 PsActiveProcessHeadGVA;
+}PS_ACTIVE_PROCESS;
+extern PS_ACTIVE_PROCESS PsActiveProcess;
+
+typedef struct _LIST_ENTRY32
+{
+    DWORD Flink;
+    DWORD Blink;
+}WIN_LIST_ENTRY32;
+
+typedef struct _LIST_ENTRY64
+{
+    QWORD Flink;
+    QWORD Blink;
+}WIN_LIST_ENTRY64;
+
+#define LINK_OFFSET_IN_EPROCESS         (0xb8)
+#define NAME_OFFSET_IN_EPROCESS         (0x17c)
+#define PID_OFFSET_IN_EPROCESS          (0xb4)
 
 NTSTATUS
 MsgGetListOfProcesses(
@@ -853,6 +874,62 @@ MsgGetListOfProcesses(
 )
 {
     Message->ListOfProcesses.Test = 7;
+
+    WIN_LIST_ENTRY32 *psActiveProcessHead32 = NULL;
+
+    STATUS status;
+    if (!PsActiveProcess.IsAvailable)   return CX_STATUS_NOT_INITIALIZED;
+
+
+    status = ChmMapGuestGvaPagesToHost(
+        HvGetCurrentVcpu(),
+        PsActiveProcess.PsActiveProcessHeadGVA,
+        1,
+        CHM_FLAG_AUTO_ALIGN,
+        &psActiveProcessHead32,
+        NULL,
+        TAG_CMDLINE
+    );
+    if (!CX_SUCCESS(status))
+    {
+        ERROR("GuestVAToHostVA", status);
+        return status;
+    }
+
+    DWORD contor = 0;
+    QWORD processLinkGva = psActiveProcessHead32->Flink;
+    while (processLinkGva != PsActiveProcess.PsActiveProcessHeadGVA)
+    {
+        WIN_LIST_ENTRY32 *processLinkHva;
+        status = ChmMapGuestGvaPagesToHost(
+            HvGetCurrentVcpu(),
+            processLinkGva,
+            1,
+            CHM_FLAG_AUTO_ALIGN,
+            &processLinkHva,
+            NULL,
+            TAG_CMDLINE
+        );
+        if (!CX_SUCCESS(status))
+        {
+            ERROR("GuestVAToHostVA", status);
+            return status;
+        }
+
+        char procName[32] = { 0 };
+        BYTE *processHVa = (BYTE *)processLinkHva - LINK_OFFSET_IN_EPROCESS;
+        char *processName = (char *)(&processHVa[NAME_OFFSET_IN_EPROCESS]);
+        DWORD processId = *((DWORD *)(&processHVa[PID_OFFSET_IN_EPROCESS]));
+        strncpy(procName, processName, 15);
+
+        LOG("-----> process ID = [%d]\n", processId);
+        LOG("-----> processName = [%s]\n", procName);
+
+        contor++;
+        processLinkGva = processLinkHva->Flink;
+
+        ChmUnmapGuestGvaPages(&processLinkHva, TAG_CMDLINE);
+    }
 
     return CX_STATUS_SUCCESS;
 }

@@ -150,13 +150,19 @@ CommGetCommPortByComponent(
 
 #define MZPE_MAGIC 0x5a4d
 
-static CX_UINT8 GuestMode = 0;
-#define LINK_OFFSET_IN_EPROCESS         (GuestMode == ND_CODE_32 ? 0xb8 : 0x2f0)
-#define NAME_OFFSET_IN_EPROCESS         (GuestMode == ND_CODE_32 ? 0x17c : 0x0448)
-#define PID_OFFSET_IN_EPROCESS          (GuestMode == ND_CODE_32 ? 0xb4 : 0x2e8)
-#define IS_KERNEL_POINTER(x)            (GuestMode == ND_CODE_64 ? ((x) & 0xffff800000000000) != 0 : ((x) & 0x80000000) != 0)
+CX_UINT8 GuestMode = 0;
+#define LINK_OFFSET_IN_EPROCESS         (0xb8)
+#define NAME_OFFSET_IN_EPROCESS         (0x17c)
+#define PID_OFFSET_IN_EPROCESS          (0xb4)
+#define IS_KERNEL_POINTER(x)            (((x) & 0x80000000) != 0)
 
-CX_UINT64 PsActiveProcessHeadGVA;
+typedef struct _PS_ACTIVE_PROCESS
+{
+    CX_BOOL IsAvailable;
+    CX_UINT64 PsActiveProcessHeadGVA;
+}PS_ACTIVE_PROCESS;
+PS_ACTIVE_PROCESS PsActiveProcess;
+
 
 typedef struct _IMAGE_DOS_HEADER {      // DOS .EXE header
     WORD   e_magic;                     // Magic number
@@ -228,60 +234,33 @@ _IsGvaPsActiveProcess(
 {
     BOOLEAN result = FALSE;
     WIN_LIST_ENTRY32 *listEntry32 = NULL;
-    WIN_LIST_ENTRY64 *listEntry64 = NULL;
     BYTE *possibleSystemProcessHva = NULL;
 
     STATUS status;
-    if (GuestMode == ND_CODE_32)
-    {
-        status = ChmMapGuestGvaPagesToHost(
-            HvGetCurrentVcpu(),
-            Gva,
-            1,
-            CHM_FLAG_AUTO_ALIGN,
-            &listEntry32,
-            NULL,
-            TAG_CMDLINE
-        );
-    }
-    else
-    {
-        status = ChmMapGuestGvaPagesToHost(
-            HvGetCurrentVcpu(),
-            Gva,
-            1,
-            CHM_FLAG_AUTO_ALIGN,
-            &listEntry64,
-            NULL,
-            TAG_CMDLINE
-        );
-    }
+    if (GuestMode != ND_CODE_32)    return FALSE;
+
+    status = ChmMapGuestGvaPagesToHost(
+        HvGetCurrentVcpu(),
+        Gva,
+        1,
+        CHM_FLAG_AUTO_ALIGN,
+        &listEntry32,
+        NULL,
+        TAG_CMDLINE
+    );
     if (!CX_SUCCESS(status))
     {
         ERROR("GuestVAToHostVA %d", status);
         return FALSE;
     }
 
-    if (GuestMode == ND_CODE_32)
+    if (!IS_KERNEL_POINTER(listEntry32->Flink) || !IS_KERNEL_POINTER(listEntry32->Blink))
     {
-        if (!IS_KERNEL_POINTER(listEntry32->Flink) || !IS_KERNEL_POINTER(listEntry32->Blink))
-        {
-            result = FALSE;
-            goto cleanup;
-        }
-    }
-    else
-    {
-        if (!IS_KERNEL_POINTER(listEntry64->Flink) || !IS_KERNEL_POINTER(listEntry64->Blink))
-        {
-            result = FALSE;
-            goto cleanup;
-        }
+        result = FALSE;
+        goto cleanup;
     }
 
-
-    QWORD possibleSystemProcessGva = GuestMode == ND_CODE_32 ?
-        listEntry32->Flink : listEntry64->Flink;
+    QWORD possibleSystemProcessGva = listEntry32->Flink;
     possibleSystemProcessGva -= LINK_OFFSET_IN_EPROCESS;
 
     status = ChmMapGuestGvaPagesToHost(
@@ -311,9 +290,8 @@ _IsGvaPsActiveProcess(
     }
 
 cleanup:
-    if (listEntry32 != NULL)                ChmUnmapGuestGvaPages(&listEntry32, TAG_CMDLINE);
-    if (listEntry64 != NULL)                ChmUnmapGuestGvaPages(&listEntry64, TAG_CMDLINE);
     if (possibleSystemProcessHva != NULL)   ChmUnmapGuestGvaPages(&possibleSystemProcessHva, TAG_CMDLINE);
+    if (listEntry32 != NULL)                ChmUnmapGuestGvaPages(&listEntry32, TAG_CMDLINE);
 
     return result;
 }
@@ -436,53 +414,29 @@ GuestClientConnected(
         goto cleanup;
     }
 
-    if (GuestMode == ND_CODE_64)
+    if (GuestMode != ND_CODE_32)
     {
-        INTR_INTERRUPT_GATE *gate;
-        status = ChmMapGuestGvaPagesToHost(
-            HvGetCurrentVcpu(),
-            idtBase + 14 * sizeof(INTR_INTERRUPT_GATE),
-            1,
-            0,
-            &gate,
-            NULL,
-            TAG_CMDLINE
-        );
-        if (!CX_SUCCESS(status))
-        {
-            ERROR("GuestVAToHostVA %d\n", status);
-            //goto cleanup;
-        }
-        pageFaultHandler = ((QWORD)gate->Offset_63_32 << 32) | ((QWORD)gate->Offset_31_16 << 16) | ((QWORD)gate->Offset_15_0);
-
-        ChmUnmapGuestGvaPages(&gate, TAG_CMDLINE);
+        PsActiveProcess.IsAvailable = FALSE;
+        goto cleanup;
     }
-    else if (GuestMode == ND_CODE_32)
+
+    INTR_INTERRUPT_GATE32 *gate;
+    status = ChmMapGuestGvaPagesToHost(
+        HvGetCurrentVcpu(),
+        idtBase + 14 * sizeof(INTR_INTERRUPT_GATE32),
+        1,
+        0,
+        &gate,
+        NULL,
+        TAG_CMDLINE
+    );
+    if (!CX_SUCCESS(status))
     {
-        INTR_INTERRUPT_GATE32 *gate;
-        status = ChmMapGuestGvaPagesToHost(
-            HvGetCurrentVcpu(),
-            idtBase + 14 * sizeof(INTR_INTERRUPT_GATE32),
-            1,
-            0,
-            &gate,
-            NULL,
-            TAG_CMDLINE
-        );
-        if (!CX_SUCCESS(status))
-        {
-            ERROR("GuestVAToHostVA %d\n", status);
-            //goto cleanup;
-        }
-
-        pageFaultHandler = ((QWORD)gate->Offset_31_16 << 16) | ((QWORD)gate->Offset_15_0);
-
-        ChmUnmapGuestGvaPages(&gate, TAG_CMDLINE);
+        ERROR("GuestVAToHostVA %d\n", status);
+        goto cleanup;
     }
-    else
-    {
-        LOG("Problem !!!!!!\n");
-    }
+    pageFaultHandler = ((QWORD)gate->Offset_31_16 << 16) | ((QWORD)gate->Offset_15_0);
+    ChmUnmapGuestGvaPages(&gate, TAG_CMDLINE);
 
     CX_UINT64 possibleStartOfKernelGva = pageFaultHandler & PAGE_MASK;
 
@@ -553,7 +507,8 @@ GuestClientConnected(
                 if (_IsGvaPsActiveProcess(possiblePsActiveProcessHeadGva))
                 {
                     LOG("!!!!!FOUND PsActiveProcess!!!!! Gva = 0x%X\n", possiblePsActiveProcessHeadGva);
-                    PsActiveProcessHeadGVA = possiblePsActiveProcessHeadGva;
+                    PsActiveProcess.PsActiveProcessHeadGVA = possiblePsActiveProcessHeadGva;
+                    PsActiveProcess.IsAvailable = TRUE;
                     goto cleanup;
                 }
             }
