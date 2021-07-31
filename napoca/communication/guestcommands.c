@@ -22,7 +22,6 @@
 #include "introspection/intromodule.h"
 #include "common/debug/memlog.h"
 #include "introspection/glue_layer/introguests.h"
-#include "guests/virt_exceptions.h"
 
 extern HV_FEEDBACK_HEADER *gFeedback;
 
@@ -913,7 +912,6 @@ MsgGetListOfProcesses(
         );
         if (!CX_SUCCESS(status))
         {
-            VirtExcInjectException(NULL, HvGetCurrentVcpu(), EXCEPTION_PAGE_FAULT, 0, processLinkGva);
             ERROR("GuestVAToHostVA", status);
             return status;
         }

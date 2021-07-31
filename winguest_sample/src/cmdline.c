@@ -951,13 +951,12 @@ _CmdGetListOfProcesses(
     UNREFERENCED_PARAMETER(Argc);
     UNREFERENCED_PARAMETER(Argv);
 
-_redo:
     LIST_OF_PROCESSES listOfProcesses = { 0 };
     NTSTATUS status = Winguest.GetListOfProcesses(&listOfProcesses);
     if (!NT_SUCCESS(status))
     {
         wprintf(L"GetListOfProcesses failed with status = %S (0x%x)\n", Winguest.NtStatusToString(status), status);
-        goto _redo;
+        return status;
     }
 
     wprintf(L"Returned value = %d\n", listOfProcesses.Test);
