@@ -900,12 +900,13 @@ MsgGetListOfProcesses(
     QWORD processLinkGva = psActiveProcessHead32->Flink;
     while (processLinkGva != PsActiveProcess.PsActiveProcessHeadGVA)
     {
+        CX_UINT32 pageOffset = CX_PAGE_OFFSET_4K(processLinkGva);
         WIN_LIST_ENTRY32 *processLinkHva;
         status = ChmMapGuestGvaPagesToHost(
             HvGetCurrentVcpu(),
             processLinkGva,
             1,
-            CHM_FLAG_AUTO_ALIGN,
+            0,
             &processLinkHva,
             NULL,
             TAG_CMDLINE
@@ -915,6 +916,7 @@ MsgGetListOfProcesses(
             ERROR("GuestVAToHostVA", status);
             return status;
         }
+        processLinkHva = (WIN_LIST_ENTRY32 *)((CX_UINT64)processLinkHva + pageOffset);
 
         char procName[32] = { 0 };
         BYTE *processHVa = (BYTE *)processLinkHva - LINK_OFFSET_IN_EPROCESS;
@@ -930,6 +932,7 @@ MsgGetListOfProcesses(
 
         ChmUnmapGuestGvaPages(&processLinkHva, TAG_CMDLINE);
     }
+    LOG("--------------> End of process list!\n");
 
     return CX_STATUS_SUCCESS;
 }
