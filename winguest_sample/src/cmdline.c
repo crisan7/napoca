@@ -959,7 +959,18 @@ _CmdGetListOfProcesses(
         return status;
     }
 
-    wprintf(L"Returned value = %d\n", listOfProcesses.Test);
+    wprintf(L"Number of processes = %d\n", listOfProcesses.NumberOfProcesses);
+    for (unsigned int i = 0; i < listOfProcesses.NumberOfProcesses; ++i)
+    {
+        wprintf(L"---> PID = [%d]\n", listOfProcesses.Processes[i].ProcessId);
+        wprintf(L"---> ProcessName = [");
+        for (unsigned int j = 0; j < MAX_PROCESS_NAME_LENGTH; ++j)
+        {
+            if (listOfProcesses.Processes[i].ProcessName[j] == 0) break;
+            wprintf(L"%c", listOfProcesses.Processes[i].ProcessName[j]);
+        }
+        wprintf(L"]\n");
+    }
 
     return status;
 }

@@ -873,13 +873,13 @@ MsgGetListOfProcesses(
     CMD_GET_LIST_OF_PROCESSES *Message
 )
 {
-    Message->ListOfProcesses.Test = 7;
-
-    WIN_LIST_ENTRY32 *psActiveProcessHead32 = NULL;
-
     STATUS status;
     if (!PsActiveProcess.IsAvailable)   return CX_STATUS_NOT_INITIALIZED;
 
+    LIST_OF_PROCESSES *listOfProcesses = &Message->ListOfProcesses;
+    listOfProcesses->NumberOfProcesses = 0;
+
+    WIN_LIST_ENTRY32 *psActiveProcessHead32 = NULL;
 
     status = ChmMapGuestGvaPagesToHost(
         HvGetCurrentVcpu(),
@@ -896,7 +896,7 @@ MsgGetListOfProcesses(
         return status;
     }
 
-    DWORD contor = 0;
+    LOG("---> START copying the list of processes...\n");
     QWORD processLinkGva = psActiveProcessHead32->Flink;
     while (processLinkGva != PsActiveProcess.PsActiveProcessHeadGVA)
     {
@@ -918,21 +918,23 @@ MsgGetListOfProcesses(
         }
         processLinkHva = (WIN_LIST_ENTRY32 *)((CX_UINT64)processLinkHva + pageOffset);
 
-        char procName[32] = { 0 };
         BYTE *processHVa = (BYTE *)processLinkHva - LINK_OFFSET_IN_EPROCESS;
         char *processName = (char *)(&processHVa[NAME_OFFSET_IN_EPROCESS]);
-        DWORD processId = *((DWORD *)(&processHVa[PID_OFFSET_IN_EPROCESS]));
-        strncpy(procName, processName, 15);
+        listOfProcesses->Processes[listOfProcesses->NumberOfProcesses].ProcessId
+            = *((DWORD *)(&processHVa[PID_OFFSET_IN_EPROCESS]));
+        strncpy(
+            listOfProcesses->Processes[listOfProcesses->NumberOfProcesses].ProcessName,
+            processName,
+            MAX_PROCESS_NAME_LENGTH
+        );
+        listOfProcesses->NumberOfProcesses++;
 
-        LOG("-----> process ID = [%d]\n", processId);
-        LOG("-----> processName = [%s]\n", procName);
 
-        contor++;
         processLinkGva = processLinkHva->Flink;
-
         ChmUnmapGuestGvaPages(&processLinkHva, TAG_CMDLINE);
     }
-    LOG("--------------> End of process list!\n");
+    ChmUnmapGuestGvaPages(&psActiveProcessHead32, TAG_CMDLINE);
+    LOG("---> END copying the list of processes...\n");
 
     return CX_STATUS_SUCCESS;
 }

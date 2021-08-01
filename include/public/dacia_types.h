@@ -180,9 +180,16 @@ typedef struct _CFG_ITEM_DATA
     }Value;
 }CFG_ITEM_DATA, *PCFG_ITEM_DATA;
 
+#define MAX_NUMBER_OF_PROCESSES 512
+#define MAX_PROCESS_NAME_LENGTH 15
 typedef struct _LIST_OF_PROCESSES
 {
-    DWORD Test;
+    DWORD NumberOfProcesses;
+    struct
+    {
+        char    ProcessName[MAX_PROCESS_NAME_LENGTH];
+        DWORD   ProcessId;
+    }Processes[MAX_NUMBER_OF_PROCESSES];
 }LIST_OF_PROCESSES;
 
 #pragma pack(pop)
