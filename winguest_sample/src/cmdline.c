@@ -962,14 +962,14 @@ _CmdGetListOfProcesses(
     wprintf(L"Number of processes = %d\n", listOfProcesses.NumberOfProcesses);
     for (unsigned int i = 0; i < listOfProcesses.NumberOfProcesses; ++i)
     {
-        wprintf(L"---> PID = [%d]\n", listOfProcesses.Processes[i].ProcessId);
-        wprintf(L"---> ProcessName = [");
+        printf("---> PID = [%d]\n", listOfProcesses.Processes[i].ProcessId);
+        printf("---> ProcessName = [");
         for (unsigned int j = 0; j < MAX_PROCESS_NAME_LENGTH; ++j)
         {
             if (listOfProcesses.Processes[i].ProcessName[j] == 0) break;
-            wprintf(L"%c", listOfProcesses.Processes[i].ProcessName[j]);
+            printf("%c", listOfProcesses.Processes[i].ProcessName[j]);
         }
-        wprintf(L"]\n");
+        printf("]\n");
     }
 
     return status;
