@@ -25,6 +25,12 @@
     <Filter Include="Source Files\dll_utils">
       <UniqueIdentifier>{31b40827-07c2-418d-b1cc-fd0912c02fd4}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Header Files\kafka">
+      <UniqueIdentifier>{0a20598d-416a-47a6-9c13-091c6119066d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\kafka">
+      <UniqueIdentifier>{3e416a3c-848b-4da6-bcae-62fe5093cb59}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\main.c">
@@ -39,6 +45,9 @@
     <ClCompile Include="src\feedback.c">
       <Filter>Source Files\dll_utils</Filter>
     </ClCompile>
+    <ClCompile Include="src\kafka_connector.c">
+      <Filter>Source Files\kafka</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\cmdline.h">
@@ -49,6 +58,9 @@
     </ClInclude>
     <ClInclude Include="include\feedback.h">
       <Filter>Header Files\dll_utils</Filter>
+    </ClInclude>
+    <ClInclude Include="include\kafka_connector.h">
+      <Filter>Header Files\kafka</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

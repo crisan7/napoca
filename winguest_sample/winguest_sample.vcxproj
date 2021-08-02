@@ -161,12 +161,14 @@
     <ClCompile Include="src\cmdline.c" />
     <ClCompile Include="src\feedback.c" />
     <ClCompile Include="src\imports.c" />
+    <ClCompile Include="src\kafka_connector.c" />
     <ClCompile Include="src\main.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\cmdline.h" />
     <ClInclude Include="include\feedback.h" />
     <ClInclude Include="include\imports.h" />
+    <ClInclude Include="include\kafka_connector.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

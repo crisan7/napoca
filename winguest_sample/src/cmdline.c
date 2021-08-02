@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include "imports.h"
 #include "feedback.h"
+#include "kafka_connector.h"
 
 static BOOLEAN  IsApplicationConnectedToDriver;
 
@@ -259,6 +260,8 @@ CmdLineInit(
         }
     }
 
+    KafkaConnectorInit();
+
     return isSuccess;
 }
 
@@ -465,6 +468,8 @@ _CmdExit(
     }
 
     ImportsUninit();
+
+    KafkaConnectorUninit();
 
     ExitProcess(0);
 }
@@ -971,6 +976,9 @@ _CmdGetListOfProcesses(
         }
         printf("]\n");
     }
+
+    char *dummyText = "{\"statusString\":\"SUCCESS\", \"statusInt\":0}";
+    KafkaConnectorSentMessage(dummyText, strlen(dummyText));
 
     return status;
 }
