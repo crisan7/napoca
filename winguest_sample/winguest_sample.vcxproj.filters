@@ -51,4 +51,7 @@
       <Filter>Header Files\dll_utils</Filter>
     </ClInclude>
   </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config" />
+  </ItemGroup>
 </Project>
