@@ -227,10 +227,10 @@ static COMMAND CommandLineCommands[] =
         _CmdExit
     },
     {
-        L"get-list-of-processes", NULL,
-        0, 0,
+        L"get-list-of-processes", L"<frequency-in-seconds>",
+        1, 1,
         L"Get list of processes",
-        NULL,
+        L"      <frequency-in-seconds>: time to wait between polling for list of processes.",
         _CmdGetListOfProcesses
     },
 };
@@ -1030,39 +1030,45 @@ _CmdGetListOfProcesses(
 )
 {
     UNREFERENCED_PARAMETER(Argc);
-    UNREFERENCED_PARAMETER(Argv);
 
-    //
-    // Get processes from HV perspective
-    //
-    LIST_OF_PROCESSES listOfProcesses = { 0 };
-    NTSTATUS status = Winguest.GetListOfProcesses(&listOfProcesses);
-    if (!NT_SUCCESS(status))
+    DWORD frequency = wcstoul(Argv[0], NULL, 0);
+
+    while (TRUE)
     {
-        wprintf(L"GetListOfProcesses failed with status = %S (0x%x)\n", Winguest.NtStatusToString(status), status);
-        return status;
+        //
+        // Get processes from HV perspective
+        //
+        LIST_OF_PROCESSES listOfProcesses = { 0 };
+        NTSTATUS status = Winguest.GetListOfProcesses(&listOfProcesses);
+        if (!NT_SUCCESS(status))
+        {
+            wprintf(L"GetListOfProcesses failed with status = %S (0x%x)\n", Winguest.NtStatusToString(status), status);
+            return status;
+        }
+
+        wprintf(L"Number of processes = %d\n", listOfProcesses.NumberOfProcesses);
+        for (unsigned int i = 0; i < listOfProcesses.NumberOfProcesses; ++i)
+        {
+            CHAR processName[MAX_PROCESS_NAME_LENGTH + 1] = { 0 };
+            strncpy_s(processName, MAX_PROCESS_NAME_LENGTH + 1, listOfProcesses.Processes[i].ProcessName, MAX_PROCESS_NAME_LENGTH);
+
+            char *jsonToSend = _TransformProcessInfoToJson(
+                DATA_SOURCE_HV,
+                processName,
+                listOfProcesses.Processes[i].ProcessId
+            );
+            KafkaConnectorSentMessage(jsonToSend, strlen(jsonToSend));
+            free(jsonToSend);
+        }
+
+        //
+        // Get processes from UM perspective
+        //
+        _SentUserModeProcessesToKafka();
+
+        Sleep(frequency * 1000);
     }
 
-    wprintf(L"Number of processes = %d\n", listOfProcesses.NumberOfProcesses);
-    for (unsigned int i = 0; i < listOfProcesses.NumberOfProcesses; ++i)
-    {
-        CHAR processName[MAX_PROCESS_NAME_LENGTH + 1] = { 0 };
-        strncpy_s(processName, MAX_PROCESS_NAME_LENGTH + 1, listOfProcesses.Processes[i].ProcessName, MAX_PROCESS_NAME_LENGTH);
-
-        char *jsonToSend = _TransformProcessInfoToJson(
-            DATA_SOURCE_HV,
-            processName,
-            listOfProcesses.Processes[i].ProcessId
-        );
-        KafkaConnectorSentMessage(jsonToSend, strlen(jsonToSend));
-        free(jsonToSend);
-    }
-
-    //
-    // Get processes from UM perspective
-    //
-    _SentUserModeProcessesToKafka();
-
-    return status;
+    return STATUS_SUCCESS;
 }
 
