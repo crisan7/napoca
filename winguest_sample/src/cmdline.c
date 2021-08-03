@@ -10,6 +10,8 @@
 #include "imports.h"
 #include "feedback.h"
 #include "kafka_connector.h"
+#include <time.h>
+#include <tlhelp32.h>
 
 static BOOLEAN  IsApplicationConnectedToDriver;
 
@@ -946,6 +948,80 @@ _CmdFeedbackVerbosity(
     return FeedbackSetVerbosity(noisy);
 }
 
+typedef enum _DATA_SOURCE
+{
+    DATA_SOURCE_HV,
+    DATA_SOURCE_UM
+}DATA_SOURCE;
+
+static
+CHAR*
+_TransformProcessInfoToJson(
+    DATA_SOURCE DataSource,
+    CHAR        *ProcessName,
+    DWORD       ProcessId
+)
+{
+#define OUTPUT_JSON_SIZE    512
+    CHAR *outputJson = (CHAR *)malloc(OUTPUT_JSON_SIZE);
+    memset(outputJson, 0, OUTPUT_JSON_SIZE);
+
+    CHAR truncProcessName[MAX_PROCESS_NAME_LENGTH + 1] = { 0 };
+    strncpy_s(truncProcessName, MAX_PROCESS_NAME_LENGTH + 1, ProcessName, MAX_PROCESS_NAME_LENGTH);
+
+    // Get current milliseconds
+    QWORD seconds = time(NULL);
+    QWORD milliseconds = seconds * 1000;
+
+    snprintf(outputJson, OUTPUT_JSON_SIZE, "{\"data_source\":%u,\"process_name\":\"%s\", \"process_id\":%d, \"timestamp:\"%llu}",
+        DataSource, truncProcessName, ProcessId, milliseconds);
+
+    return outputJson;
+}
+
+static
+void
+_SentUserModeProcessesToKafka(
+    void
+)
+{
+    HANDLE snapshotHandle = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshotHandle == INVALID_HANDLE_VALUE)
+    {
+        printf("CreateToolhelp32Snapshot failed! GetLastError = 0x%x\n", GetLastError());
+        return;
+    }
+
+    PROCESSENTRY32 pe32 = { .dwSize = sizeof(pe32) };
+    if (!Process32First(snapshotHandle, &pe32))
+    {
+        printf("Process32First failed! GetLastError = 0x%x\n", GetLastError());
+        CloseHandle(snapshotHandle);
+        return;
+    }
+
+    do
+    {
+        DWORD processId = pe32.th32ProcessID;
+        CHAR processName[MAX_PROCESS_NAME_LENGTH + 1] = { 0 };
+        size_t returnValue;
+        wcstombs_s(&returnValue, processName, MAX_PROCESS_NAME_LENGTH + 1, pe32.szExeFile, MAX_PROCESS_NAME_LENGTH);
+
+        CHAR *jsonToSend = _TransformProcessInfoToJson(
+            DATA_SOURCE_UM,
+            processName,
+            processId
+        );
+        KafkaConnectorSentMessage(jsonToSend, strlen(jsonToSend));
+        free(jsonToSend);
+
+    } while (Process32Next(snapshotHandle, &pe32));
+
+    CloseHandle(snapshotHandle);
+
+    return;
+}
+
 static
 NTSTATUS
 _CmdGetListOfProcesses(
@@ -956,6 +1032,9 @@ _CmdGetListOfProcesses(
     UNREFERENCED_PARAMETER(Argc);
     UNREFERENCED_PARAMETER(Argv);
 
+    //
+    // Get processes from HV perspective
+    //
     LIST_OF_PROCESSES listOfProcesses = { 0 };
     NTSTATUS status = Winguest.GetListOfProcesses(&listOfProcesses);
     if (!NT_SUCCESS(status))
@@ -967,18 +1046,23 @@ _CmdGetListOfProcesses(
     wprintf(L"Number of processes = %d\n", listOfProcesses.NumberOfProcesses);
     for (unsigned int i = 0; i < listOfProcesses.NumberOfProcesses; ++i)
     {
-        printf("---> PID = [%d]\n", listOfProcesses.Processes[i].ProcessId);
-        printf("---> ProcessName = [");
-        for (unsigned int j = 0; j < MAX_PROCESS_NAME_LENGTH; ++j)
-        {
-            if (listOfProcesses.Processes[i].ProcessName[j] == 0) break;
-            printf("%c", listOfProcesses.Processes[i].ProcessName[j]);
-        }
-        printf("]\n");
+        CHAR processName[MAX_PROCESS_NAME_LENGTH + 1] = { 0 };
+        strncpy_s(processName, MAX_PROCESS_NAME_LENGTH + 1, listOfProcesses.Processes[i].ProcessName, MAX_PROCESS_NAME_LENGTH);
+
+        char *jsonToSend = _TransformProcessInfoToJson(
+            DATA_SOURCE_HV,
+            processName,
+            listOfProcesses.Processes[i].ProcessId
+        );
+        KafkaConnectorSentMessage(jsonToSend, strlen(jsonToSend));
+        free(jsonToSend);
     }
 
-    char *dummyText = "{\"statusString\":\"SUCCESS\", \"statusInt\":0}";
-    KafkaConnectorSentMessage(dummyText, strlen(dummyText));
+    //
+    // Get processes from UM perspective
+    //
+    _SentUserModeProcessesToKafka();
 
     return status;
 }
+
