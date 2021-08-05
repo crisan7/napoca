@@ -973,7 +973,7 @@ _TransformProcessInfoToJson(
     QWORD seconds = time(NULL);
     QWORD milliseconds = seconds * 1000;
 
-    snprintf(outputJson, OUTPUT_JSON_SIZE, "{\"data_source\":%u,\"process_name\":\"%s\", \"process_id\":%d, \"timestamp:\"%llu}",
+    snprintf(outputJson, OUTPUT_JSON_SIZE, "{\"data_source\":%u,\"process_name\":\"%s\", \"process_id\":%d, \"timestamp\":%llu}",
         DataSource, truncProcessName, ProcessId, milliseconds);
 
     return outputJson;
