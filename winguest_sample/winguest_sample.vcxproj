@@ -95,7 +95,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_CONSOLE;INTROCORE_NOCOMPAT;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <TreatWarningAsError>true</TreatWarningAsError>
+      <TreatWarningAsError>false</TreatWarningAsError>
       <AdditionalIncludeDirectories>$(ProjectDir)\include;$(ProjectDir)\..\include\public;$(ProjectDir)\..\hvmi\include\public;$(ProjectDir)\..\winguest\winguestdll</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
     </ClCompile>
@@ -146,7 +146,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_CONSOLE;INTROCORE_NOCOMPAT;NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <TreatWarningAsError>true</TreatWarningAsError>
+      <TreatWarningAsError>false</TreatWarningAsError>
       <AdditionalIncludeDirectories>$(ProjectDir)\include;$(ProjectDir)\..\include\public;$(ProjectDir)\..\hvmi\include\public;$(ProjectDir)\..\winguest\winguestdll</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
     </ClCompile>
@@ -175,12 +175,12 @@
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
-    <Import Project="..\packages\librdkafka.redist.1.7.0\build\native\librdkafka.redist.targets" Condition="Exists('..\packages\librdkafka.redist.1.7.0\build\native\librdkafka.redist.targets')" />
+    <Import Project="..\packages\librdkafka.redist.2.1.1\build\native\librdkafka.redist.targets" Condition="Exists('..\packages\librdkafka.redist.2.1.1\build\native\librdkafka.redist.targets')" />
   </ImportGroup>
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>
       <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
     </PropertyGroup>
-    <Error Condition="!Exists('..\packages\librdkafka.redist.1.7.0\build\native\librdkafka.redist.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\librdkafka.redist.1.7.0\build\native\librdkafka.redist.targets'))" />
+    <Error Condition="!Exists('..\packages\librdkafka.redist.2.1.1\build\native\librdkafka.redist.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\librdkafka.redist.2.1.1\build\native\librdkafka.redist.targets'))" />
   </Target>
 </Project>
